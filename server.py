@@ -2,6 +2,7 @@ import socket
 import json
 import threading
 import sys
+import re
 
 # Server Configuration
 SERVER_IP = "127.0.0.1"  # Server IP (localhost for testing)
@@ -13,16 +14,26 @@ registered_clients = {}
 lock = threading.Lock()
 
 def process_registration(data, client_address):
-    """Handles the REGISTER request."""
-    name = data["name"]
-    role = data["role"]
+    """Handles the REGISTER request with validation."""
+    name = data["name"].strip()
+    role = data["role"].strip().capitalize()
     udp_port = data["udp_port"]
     tcp_port = data["tcp_port"]
     rq_number = data.get("rq#", 0)
-    
+
+    # Validate name: must not be empty and cannot contain numbers or symbols
+    if not name:
+        return {"type": "REGISTER-DENIED", "rq#": rq_number, "reason": "Fields empty"}
+    if not re.match(r"^[A-Za-z]+$", name):
+        return {"type": "REGISTER-DENIED", "rq#": rq_number, "reason": "Invalid name format. Only letters allowed"}
+
+    # Validate role: must be either "Buyer" or "Seller"
+    if role not in ["Buyer", "Seller"]:
+        return {"type": "REGISTER-DENIED", "rq#": rq_number, "reason": "Invalid role. Must be Buyer or Seller"}
+
     with lock:
         if name in registered_clients:
-            response = {"type": "REGISTER-DENIED", "rq#": rq_number, "reason": "Name already in use"}
+            return {"type": "REGISTER-DENIED", "rq#": rq_number, "reason": "Name already in use"}
         else:
             registered_clients[name] = {
                 "name": name,
@@ -32,9 +43,7 @@ def process_registration(data, client_address):
                 "tcp_port": tcp_port,
                 "rq#": rq_number
             }
-            response = {"type": "REGISTERED", "rq#": rq_number}
-    
-    return response
+            return {"type": "REGISTERED", "rq#": rq_number}
 
 def process_deregistration(data):
     """Handles the DE-REGISTER request."""
