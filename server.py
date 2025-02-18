@@ -3,74 +3,81 @@ import json
 import threading
 import sys
 import re
+import os
+from datetime import datetime
 
 # Server Configuration
-SERVER_IP = "127.0.0.1"  # Server IP (localhost for testing)
-SERVER_UDP_PORT = 5000  # UDP Port
-SERVER_TCP_PORT = 6000  # TCP Port for purchase finalization
+SERVER_IP = "127.0.0.1"
+SERVER_UDP_PORT = 5000
+REGISTERED_CLIENTS_FILE = "registered_clients.json"
 
 # Store registered users
-registered_clients = {}
 lock = threading.Lock()
+
+def log_message(message):
+    """Logs messages with timestamps."""
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
+
+def load_registered_clients():
+    """Loads registered clients from a file on server startup."""
+    if os.path.exists(REGISTERED_CLIENTS_FILE):
+        with open(REGISTERED_CLIENTS_FILE, "r") as file:
+            return json.load(file)
+    return {}
+
+def save_registered_clients():
+    """Saves registered clients to a file."""
+    with open(REGISTERED_CLIENTS_FILE, "w") as file:
+        json.dump(registered_clients, file)
+
+registered_clients = load_registered_clients()
 
 def process_registration(data, client_address):
     """Handles the REGISTER request with validation."""
     name = data["name"].strip()
     role = data["role"].strip().capitalize()
+    ip = data["ip"]  # Ensure this is received
     udp_port = data["udp_port"]
-    tcp_port = data["tcp_port"]
     rq_number = data.get("rq#", 0)
 
-    # Validate name: must not be empty and cannot contain numbers or symbols
-    if not name:
-        return {"type": "REGISTER-DENIED", "rq#": rq_number, "reason": "Fields empty"}
-    if not re.match(r"^[A-Za-z]+$", name):
-        return {"type": "REGISTER-DENIED", "rq#": rq_number, "reason": "Invalid name format. Only letters allowed"}
+    if not name or not re.match(r"^[A-Za-z]+$", name):
+        return {"type": "REGISTER-DENIED", "rq#": rq_number, "reason": "Invalid name"}
 
-    # Validate role: must be either "Buyer" or "Seller"
     if role not in ["Buyer", "Seller"]:
-        return {"type": "REGISTER-DENIED", "rq#": rq_number, "reason": "Invalid role. Must be Buyer or Seller"}
+        return {"type": "REGISTER-DENIED", "rq#": rq_number, "reason": "Invalid role"}
 
     with lock:
         if name in registered_clients:
             return {"type": "REGISTER-DENIED", "rq#": rq_number, "reason": "Name already in use"}
-        else:
-            registered_clients[name] = {
-                "name": name,
-                "role": role,
-                "ip": client_address[0],
-                "udp_port": udp_port,
-                "tcp_port": tcp_port,
-                "rq#": rq_number
-            }
-            return {"type": "REGISTERED", "rq#": rq_number}
+        registered_clients[name] = {
+            "name": name, "role": role, "ip": ip,
+            "udp_port": udp_port, "rq#": rq_number
+        }
+        save_registered_clients()
+        return {"type": "REGISTERED", "rq#": rq_number}
 
 def process_deregistration(data):
     """Handles the DE-REGISTER request."""
     name = data["name"]
     rq_number = data.get("rq#", 0)
-    
+
     with lock:
         if name in registered_clients:
             del registered_clients[name]
-            response = {"type": "DE-REGISTERED", "rq#": rq_number}
-        else:
-            response = {"type": "DE-REGISTER-FAILED", "rq#": rq_number, "reason": "User not registered"}
-    
-    return response
+            save_registered_clients()
+            return {"type": "DE-REGISTERED", "rq#": rq_number}
+        return {"type": "ERROR", "rq#": rq_number, "reason": "User not registered"}
 
 def get_registered_clients():
-    """Returns the list of registered clients with full details."""
+    """Returns the list of registered clients."""
     with lock:
-        if not registered_clients:
-            return {"type": "CLIENT-LIST", "clients": []}
         return {"type": "CLIENT-LIST", "clients": list(registered_clients.values())}
 
 def handle_client(message, client_address, server_socket):
     """Handles client messages in a separate thread."""
     try:
         data = json.loads(message.decode())
-        print(f"Received message from {client_address}: {data}")
+        log_message(f"📩 Received message from {client_address}: {data}")
 
         if data["type"] == "REGISTER":
             response = process_registration(data, client_address)
@@ -81,16 +88,17 @@ def handle_client(message, client_address, server_socket):
         else:
             response = {"type": "ERROR", "rq#": data.get("rq#", 0), "reason": "Invalid request"}
 
+        log_message(f"📤 Sending response to {client_address}: {response}")  # DEBUG
         server_socket.sendto(json.dumps(response).encode(), client_address)
     except (json.JSONDecodeError, ConnectionResetError):
-        print(f"Error handling request from {client_address}")
+        log_message(f"❌ Error handling request from {client_address}")
 
 def start_udp_server(stop_event):
     """Starts the UDP server with multithreading support."""
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     server_socket.bind((SERVER_IP, SERVER_UDP_PORT))
-    print(f"UDP Server listening on {SERVER_IP}:{SERVER_UDP_PORT}...")
-    
+    log_message(f"UDP Server listening on {SERVER_IP}:{SERVER_UDP_PORT}...")
+
     try:
         while not stop_event.is_set():
             server_socket.settimeout(1)
@@ -102,38 +110,21 @@ def start_udp_server(stop_event):
     finally:
         server_socket.close()
 
-def start_tcp_server(stop_event):
-    """Starts the TCP server for purchase finalization."""
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.bind((SERVER_IP, SERVER_TCP_PORT))
-    server_socket.listen(5)
-    print(f"TCP Server listening on {SERVER_IP}:{SERVER_TCP_PORT}...")
-    
-    try:
-        while not stop_event.is_set():
-            server_socket.settimeout(1)
-            try:
-                client_socket, client_address = server_socket.accept()
-                client_socket.close()
-            except socket.timeout:
-                continue
-    finally:
-        server_socket.close()
+def shutdown_server():
+    """Handles server shutdown and cleanup."""
+    log_message("Shutting down server...")
+    stop_event.set()
+    save_registered_clients()
+    udp_thread.join()
+    sys.exit(0)
 
-# Run server
 if __name__ == "__main__":
     stop_event = threading.Event()
     udp_thread = threading.Thread(target=start_udp_server, args=(stop_event,))
-    tcp_thread = threading.Thread(target=start_tcp_server, args=(stop_event,))
     udp_thread.start()
-    tcp_thread.start()
-    
+
     try:
         while True:
             pass
     except KeyboardInterrupt:
-        print("\nShutting down server")
-        stop_event.set()
-        udp_thread.join()
-        tcp_thread.join()
-        sys.exit(0)
+        shutdown_server()
