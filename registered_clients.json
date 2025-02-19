@@ -1,1 +1,1 @@
-{"Victor": {"name": "Victor", "role": "Buyer", "ip": "10.0.0.17", "udp_port": 65483, "rq#": 5}}
+{"Victor": {"name": "Victor", "role": "Buyer", "ip": "10.0.0.17", "udp_port": 65483, "rq#": 5}, "Bob": {"name": "Bob", "role": "Buyer", "ip": "172.30.84.227", "udp_port": 61639, "rq#": 1}, "Isabelle": {"name": "Isabelle", "role": "Buyer", "ip": "172.30.84.227", "udp_port": 55516, "rq#": 1}}
