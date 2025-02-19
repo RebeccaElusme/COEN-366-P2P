@@ -77,7 +77,7 @@ def handle_client(message, client_address, server_socket):
     """Handles client messages in a separate thread."""
     try:
         data = json.loads(message.decode())
-        log_message(f"📩 Received message from {client_address}: {data}")
+        log_message(f"Received message from {client_address}: {data}")
 
         if data["type"] == "REGISTER":
             response = process_registration(data, client_address)
@@ -88,10 +88,10 @@ def handle_client(message, client_address, server_socket):
         else:
             response = {"type": "ERROR", "rq#": data.get("rq#", 0), "reason": "Invalid request"}
 
-        log_message(f"📤 Sending response to {client_address}: {response}")  # DEBUG
+        log_message(f"Sending response to {client_address}: {response}")  # DEBUG
         server_socket.sendto(json.dumps(response).encode(), client_address)
     except (json.JSONDecodeError, ConnectionResetError):
-        log_message(f"❌ Error handling request from {client_address}")
+        log_message(f"Error handling request from {client_address}")
 
 def start_udp_server(stop_event):
     """Starts the UDP server with multithreading support."""

@@ -57,11 +57,11 @@ class AuctionClient:
             self.udp_socket.settimeout(5)
             response, _ = self.udp_socket.recvfrom(1024)
             response_data = json.loads(response.decode())
-            print(f"✅ Server Response: {response_data}")
+            print(f"Server Response: {response_data}")
         except socket.timeout:
-            print("⏳ No response from server.")
+            print("No response from server.")
         except json.JSONDecodeError:
-            print("❌ Error decoding server response.")
+            print("Error decoding server response.")
 
     def close_socket(self):
         """Closes the client socket."""
