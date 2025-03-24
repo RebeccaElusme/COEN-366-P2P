@@ -3,6 +3,7 @@ import json
 import threading
 import sys
 import re
+import random
 
 # Server Configuration
 SERVER_IP = "127.0.0.1"  # Server IP (localhost for testing)
@@ -16,6 +17,8 @@ lock = threading.Lock()
 #Store listings 
 items_auctions = {}
 
+#Subscriptions for the announcements 
+subscriptions = {}
 
 def process_registration(data, client_address):
     """Handles the REGISTER request with validation."""
@@ -63,6 +66,24 @@ def process_deregistration(data):
     
     return response
 
+def process_subscription(data, client_address):
+    item_name = data.get("item_name")
+    rq_number = data.get("rq#")
+
+    with lock:
+        if item_name not in items_auctions:
+            return {"type": "SUBSCRIPTION-DENIED", "rq#": rq_number, "reason": "Item not found"}
+
+        if item_name not in subscriptions:
+            subscriptions[item_name] = []
+
+        # Avoid duplicates
+        if client_address not in subscriptions[item_name]:
+            subscriptions[item_name].append(client_address)
+
+    return {"type": "SUBSCRIBED", "rq#": rq_number}
+
+
 def get_registered_clients():
     """Returns the list of registered clients with full details."""
     with lock:
@@ -83,7 +104,9 @@ def handle_client(message, client_address, server_socket):
         elif data["type"] == "SHOW-CLIENTS":
             response = get_registered_clients()
         elif data["type"] == "LIST_ITEM":
-            response = list_item(data)
+            response = list_item(data, server_socket)
+        elif data["type"] == "SUBSCRIBE":
+            response = process_subscription(data, client_address)
         else:
             response = {"type": "ERROR", "rq#": data.get("rq#", 0), "reason": "Invalid request"}
 
@@ -127,12 +150,13 @@ def start_tcp_server(stop_event):
         server_socket.close()
 
 # List items for request from sellers
-def list_item(data):
+def list_item(data, server_socket):
     rq_number = data.get("rq#")
     item_name = data.get("item_name")
     item_description = data.get("item_description")
     start_price = data.get("start_price")
     duration = data.get("duration")
+
 
     if not all([item_name, item_description, isinstance(start_price, (int, float)), isinstance(duration, int)]):
         return {"type": "LIST-DENIED", "rq#": rq_number, "reason": "Invalid fields, please review your listing."}
@@ -150,7 +174,31 @@ def list_item(data):
             "start_time": threading.Timer(duration, lambda: None)
         }
 
+        print(f"Item '{item_name}' listed for auction. Notifying subscribers...")
+
+        # For announcements
+        if item_name in subscriptions:
+            message = {
+                "type": "AUCTION_ANNOUNCE",
+                "rq#": random.randint(1000, 9999),  # can be any server-generated number
+                "item_name": item_name,
+                "description": item_description,
+                "current_price": start_price,
+                "time_left": duration
+            }
+
+            msg_encoded = json.dumps(message).encode()
+
+            for subscriber_address in subscriptions[item_name]:
+                try:
+                    server_socket.sendto(msg_encoded, subscriber_address)
+                    print(f"Sent AUCTION_ANNOUNCE to {subscriber_address}")
+                except Exception as e:
+                    print(f"Failed to send AUCTION_ANNOUNCE to {subscriber_address}: {e}")
+
+
         return {"type": "ITEM_LISTED", "rq#": rq_number}
+
 
 # Run server
 if __name__ == "__main__":

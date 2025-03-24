@@ -6,9 +6,14 @@ import sys
 
 
 class AuctionClient:
+    #Class initialization
     def __init__(self):
-        """Initialize client with user-provided information."""
-        self.name = self.get_valid_name()
+        
+        name = input("Enter name: ").strip()
+        while not name.isalpha():
+            print("Invalid name. Try again.")
+            name = input("Enter name: ").strip()
+
         self.role = self.get_valid_role()
         self.rq_counter = 0
 
@@ -26,19 +31,9 @@ class AuctionClient:
         self.running = True  # To control thread shutdown
         threading.Thread(target=self.listen_for_messages, daemon=True).start()
 
-    def get_valid_name(self):
-        """Prompt the user until they enter a valid name (letters only)."""
-        while True:
-            name = input("Enter your unique name: ").strip()
-            if not name:
-                print("Name cannot be empty. Please enter a valid name.")
-            elif not re.match("^[A-Za-z]+$", name):
-                print("Invalid name format. Only letters are allowed.")
-            else:
-                return name
 
     def get_valid_role(self):
-        """Prompt the user until they enter a valid role (Buyer/Seller)."""
+        ## Prompt the user for  (Buyer/Seller).
         while True:
             role = input("Enter your role (Buyer/Seller): ").strip().capitalize()
             if role not in ["Buyer", "Seller"]:
@@ -47,7 +42,7 @@ class AuctionClient:
                 return role
 
     def send_register_request(self):
-        """Sends a REGISTER request to the server."""
+        ## Register request to server
         self.rq_counter += 1
         request = {
             "type": "REGISTER",
@@ -61,10 +56,9 @@ class AuctionClient:
         message = json.dumps(request).encode()
         self.udp_socket.sendto(message, self.server_address)
         print(f"Sent REGISTER request: {request}")
-        self.listen_for_response()
 
     def send_deregister_request(self):
-        """Sends a DE-REGISTER request to the server."""
+        ## DE-REGISTER request to server
         self.rq_counter += 1
         request = {
             "type": "DE-REGISTER",
@@ -73,8 +67,7 @@ class AuctionClient:
         }
         message = json.dumps(request).encode()
         self.udp_socket.sendto(message, self.server_address)
-        print(f"Sent DE-REGISTER request: {request}")
-        self.listen_for_response()
+        print("Sent DE-REGISTER request:", request)
 
     def request_client_list(self):
         """Sends a request to the server to get the list of registered clients."""
@@ -82,7 +75,6 @@ class AuctionClient:
         message = json.dumps(request).encode()
         self.udp_socket.sendto(message, self.server_address)
         print("Requested list of registered clients...")
-        self.listen_for_response()
 
 
 ## Background thread for any UDP messages from the server
@@ -94,14 +86,16 @@ class AuctionClient:
                 response_data = json.loads(response.decode())
                 self.handle_server_response(response_data)
             except socket.timeout:
-                continue  # Normal timeout — just keep waiting
+                continue  # just keep waiting
             except (json.JSONDecodeError, ConnectionResetError):
                 print("Error receiving or decoding server message.")
 
-        def close_socket(self):
-            ###Closes the client socket.
+## To close clinet socket
+    def close_socket(self):
+            self.running = False
             self.udp_socket.close()
             self.tcp_socket.close()
+
 
     ############# THIS IS TO PUT A LISTING UP ######################
 
@@ -140,8 +134,6 @@ class AuctionClient:
                 message = json.dumps(request).encode()
                 self.udp_socket.sendto(message, self.server_address)
                 print(f"Sent LIST_ITEM request: {request}")
-                self.listen_for_response()
-
                 return  
 
             except ValueError:
@@ -153,16 +145,76 @@ class AuctionClient:
                 else:
                     continue  
 
-
     ################################################################
 
-# Run client
+
+#################### SUBSCRIBE TO ANNOUNCMENTS##########
+    def send_subscribe_request(self):
+        if self.role != "Buyer":
+            print("Only buyers can subscribe to items.")
+            return
+
+        item_name = input("Enter the item name to subscribe to: ")
+        if not item_name:
+            print("Item name cannot be empty.")
+            return
+
+        self.rq_counter += 1
+        request = {
+            "type": "SUBSCRIBE",
+            "rq#": self.rq_counter,
+            "item_name": item_name
+        }
+
+        message = json.dumps(request).encode()
+        self.udp_socket.sendto(message, self.server_address)
+        print("Sent SUBSCRIBE request:", request)
+
+
+    #########################################################
+
+
+############## To handle responses from server ###########
+    def handle_server_response(self, response_data):
+            rqt = response_data.get("rq#", "Unknown")
+            msg_type = response_data.get("type", "UNKNOWN")
+
+            if msg_type == "REGISTERED":
+                print(f"Registered successfully (RQ# {rqt})")
+            elif msg_type == "REGISTER-DENIED":
+                print(f"Registration failed (RQ# {rqt}): {response_data.get('reason', 'Unknown error')}")
+            elif msg_type == "DE-REGISTERED":
+                print(f"De-registered successfully (RQ# {rqt})")
+            elif msg_type == "CLIENT-LIST":
+                print("\nRegistered Clients:")
+                for client in response_data.get("clients", []):
+                    print(f"- {client.get('name')} ({client.get('role')})")
+            elif msg_type == "ITEM_LISTED":
+                print(f"Item listed successfully (RQ# {rqt})")
+            elif msg_type == "LIST-DENIED":
+                print("Item listing denied (RQ# {rqt}):", response_data.get('reason'))
+            elif msg_type == "SUBSCRIBED":
+                print(f"Subscribed successfully (RQ# {rqt})")
+            elif msg_type == "SUBSCRIPTION-DENIED":
+                print(f"Subscription failed (RQ# {rqt}): {response_data.get('reason')}")
+            elif msg_type == "AUCTION_ANNOUNCE":
+                print("\n AUCTION ANNOUNCEMENT:")
+                print(f"Item: {response_data.get('item_name')}")
+                print(f"Description: {response_data.get('description')}")
+                print(f"Current Price: {response_data.get('current_price')}")
+                print(f"Time Left: {response_data.get('time_left')}s")
+
+            else:
+                print("Unknown response:", response_data)
+
+    #####################################################
+ # Run client
 if __name__ == "__main__":
     try:
         client = AuctionClient()
         
         while True:
-            print("\nOptions:\n1. Register\n2. De-register\n3. Show List of Clients\n4. List Item (Sellers Only)\n5. Exit")
+            print("\nOptions:\n1. Register\n2. De-register\n3. Show List of Clients\n4. List Item (Sellers Only)\n5.Subscribe to Item Announcement(Buyer)\n6. Exit")
             choice = input("Enter your choice: ").strip()
 
             if choice == "1":
@@ -174,6 +226,8 @@ if __name__ == "__main__":
             elif choice == "4":
                 client.send_list_item()
             elif choice == "5":
+                client.send_subscribe_request()
+            elif choice == "6":
                 print("Exiting client...")
                 client.close_socket()
                 sys.exit(0)
