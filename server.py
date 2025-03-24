@@ -13,6 +13,10 @@ SERVER_TCP_PORT = 6000  # TCP Port for purchase finalization
 registered_clients = {}
 lock = threading.Lock()
 
+#Store listings 
+items_auctions = {}
+
+
 def process_registration(data, client_address):
     """Handles the REGISTER request with validation."""
     name = data["name"].strip()
@@ -78,6 +82,8 @@ def handle_client(message, client_address, server_socket):
             response = process_deregistration(data)
         elif data["type"] == "SHOW-CLIENTS":
             response = get_registered_clients()
+        elif data["type"] == "LIST_ITEM":
+            response = list_item(data)
         else:
             response = {"type": "ERROR", "rq#": data.get("rq#", 0), "reason": "Invalid request"}
 
@@ -119,6 +125,32 @@ def start_tcp_server(stop_event):
                 continue
     finally:
         server_socket.close()
+
+# List items for request from sellers
+def list_item(data):
+    rq_number = data.get("rq#")
+    item_name = data.get("item_name")
+    item_description = data.get("item_description")
+    start_price = data.get("start_price")
+    duration = data.get("duration")
+
+    if not all([item_name, item_description, isinstance(start_price, (int, float)), isinstance(duration, int)]):
+        return {"type": "LIST-DENIED", "rq#": rq_number, "reason": "Invalid fields, please review your listing."}
+    
+    with lock:
+        if item_name in items_auctions:
+            return {"type": "LIST-DENIED", "rq#": rq_number, "reason": "Item already listed"}
+    
+       # If everything is correct, store the item
+        items_auctions[item_name] = {
+            "description": item_description,
+            "start_price": start_price,
+            "duration": duration,
+            "current_price": start_price,
+            "start_time": threading.Timer(duration, lambda: None)
+        }
+
+        return {"type": "ITEM_LISTED", "rq#": rq_number}
 
 # Run server
 if __name__ == "__main__":
