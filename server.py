@@ -202,7 +202,9 @@ def list_item(data, server_socket):
             "start_price": start_price,
             "duration": duration,
             "current_price": start_price,
-            "announcement_rq": announcement_rq
+            "announcement_rq": announcement_rq,
+            "seller": data.get("name")
+
         }
 
         items_auctions[item_name].append(new_auction)
@@ -232,7 +234,73 @@ def list_item(data, server_socket):
 
         return {"type": "ITEM_LISTED", "rq#": rq_number}
 
+###################### PROCESSE BID ############################
 
+def process_bid(data, client_address, server_socket):
+    rq_number = data.get("rq#")
+    item_name = data.get("item_name")
+    bid_amount = data.get("bid_amount")
+    bidder_name = data.get("bidder_name")
+
+    with lock:
+        if item_name not in items_auctions:
+            return {"type": "BID_REJECTED", "rq#": rq_number, "reason": "No active auction for this item"}
+
+        auction_list = items_auctions[item_name]
+
+        # Try to find the auction matching the RQ#
+        matching_auction = None
+        for auction in auction_list:
+            if auction["announcement_rq"] == rq_number:
+                matching_auction = auction
+                break
+
+        if not matching_auction:
+            return {"type": "BID_REJECTED", "rq#": rq_number, "reason": "Invalid RQ# for this item"}
+
+        if not isinstance(bid_amount, (int, float)) or bid_amount <= matching_auction["current_price"]:
+            return {
+                "type": "BID_REJECTED",
+                "rq#": rq_number,
+                "reason": f"Bid must be higher than current price ({matching_auction['current_price']})"
+            }
+
+        # Accept bid
+        matching_auction["current_price"] = bid_amount
+        matching_auction["highest_bidder"] = bidder_name
+
+        # Send BID_ACCEPTED to bidder
+        server_socket.sendto(json.dumps({"type": "BID_ACCEPTED", "rq#": rq_number}).encode(), client_address)
+
+        # Prepare BID_UPDATE message
+        bid_update = {
+            "type": "BID_UPDATE",
+            "rq#": rq_number,
+            "item_name": item_name,
+            "highest_bid": bid_amount,
+            "bidder_name": bidder_name,
+            "time_left": matching_auction["duration"]  # For now, not dynamically updated
+        }
+
+        msg_encoded = json.dumps(bid_update).encode()
+
+        # Notify all subscribers
+        if item_name in subscriptions:
+            for sub_addr in subscriptions[item_name]:
+                server_socket.sendto(msg_encoded, sub_addr)
+
+        # Notify seller (we'll assume first seller who listed it)
+        seller_name = matching_auction.get("seller")
+        if seller_name and seller_name in registered_clients:
+            seller = registered_clients[seller_name]
+            seller_addr = (seller["ip"], seller["udp_port"])
+            server_socket.sendto(msg_encoded, seller_addr)
+
+        print(f"Accepted bid from {bidder_name} on '{item_name}' for {bid_amount}")
+        return None  # No need to send further response here
+
+
+################################################################
 # Run server
 if __name__ == "__main__":
     stop_event = threading.Event()

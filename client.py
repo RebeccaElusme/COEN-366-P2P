@@ -195,9 +195,48 @@ class AuctionClient:
             self.udp_socket.sendto(json.dumps(request).encode(), self.server_address)
             print("Sent DE-SUBSCRIBE request:", request)
 
-    ################################################################
+######################################################################
+###################   SEND A BID REQUEST  #####################################
+    def send_bid_request(self):
+        if self.role != "Buyer":
+            print("Only buyers can place bids")
+            return
 
-    ############## To handle responses from server #################
+        print("\n--Place a Bid--")
+        item_name = input("Enter item name you want to bid on: ").strip()
+        if not item_name:
+            print("Item name cannot be empty.")
+            return
+
+        try:
+            bid_amount = float(input("Enter your bid amount: ").strip())
+        except ValueError:
+            print("Invalid bid amount.")
+            return
+
+        try:
+            rq_input = input("Enter the RQ# from the AUCTION_ANNOUNCE: ").strip()
+            rq_number = int(rq_input)
+        except ValueError:
+            print("Invalid RQ#.")
+            return
+
+        self.rq_counter += 1
+        request = {
+            "type": "BID",
+            "rq#": rq_number,  # This links to the original AUCTION_ANNOUNCE
+            "item_name": item_name,
+            "bid_amount": bid_amount,
+            "bidder_name": self.name
+        }
+
+        self.udp_socket.sendto(json.dumps(request).encode(), self.server_address)
+        print("Sent BID request:", request)
+
+######################################################################
+
+
+#################### To handle responses from server #################
     def handle_server_response(self, response_data):
                 rqt = response_data.get("rq#", "Unknown")
                 msg_type = response_data.get("type", "UNKNOWN")
@@ -249,7 +288,9 @@ if __name__ == "__main__":
             print("4. List Item (Sellers Only)")
             print("5. Subscribe to Item Announcement (Buyer)")
             print("6. Unsubscribe from Item (Buyer)")
-            print("7. Exit")
+            print("7. Place a Bid (Buyer)")
+            print("8. Exit")
+
             choice = input("Enter your choice: ").strip()
 
             if choice == "1":
@@ -265,6 +306,8 @@ if __name__ == "__main__":
             elif choice == "6":
                 client.send_unsubscribe_request()
             elif choice == "7":
+                client.send_bid_request()
+            elif choice == "8":
                 print("Exiting client...")
                 client.close_socket()
                 sys.exit(0)
