@@ -17,6 +17,7 @@ lock = threading.Lock()
 #Store listings 
 items_auctions = {}
 
+
 #Subscriptions for the announcements 
 subscriptions = {}
 
@@ -66,22 +67,46 @@ def process_deregistration(data):
     
     return response
 
-def process_subscription(data, client_address):
+def process_subscription(data, client_address,server_socket):
     item_name = data.get("item_name")
     rq_number = data.get("rq#")
 
     with lock:
-        if item_name not in items_auctions:
-            return {"type": "SUBSCRIPTION-DENIED", "rq#": rq_number, "reason": "Item not found"}
-
         if item_name not in subscriptions:
             subscriptions[item_name] = []
 
-        # Avoid duplicates
         if client_address not in subscriptions[item_name]:
             subscriptions[item_name].append(client_address)
 
+        #  Send announcement now if item already here
+        if item_name in items_auctions:
+            for auction in items_auctions[item_name]:
+                auction_announce = {
+                    "type": "AUCTION_ANNOUNCE",
+                    "rq#": auction["announcement_rq"],
+                    "item_name": item_name,
+                    "description": auction["description"],
+                    "current_price": auction["current_price"],
+                    "time_left": auction["duration"]
+                }
+                server_socket.sendto(json.dumps(auction_announce).encode(), client_address)
+                print(f"Sent AUCTION_ANNOUNCE (existing) to {client_address}")
+
     return {"type": "SUBSCRIBED", "rq#": rq_number}
+
+def process_unsubscribe(data, client_address):
+    item_name = data.get("item_name")
+    rq_number = data.get("rq#")
+
+    with lock:
+        if item_name not in subscriptions:
+            return {"type": "UNSUBSCRIBE-FAILED", "rq#": rq_number, "reason": "Item not found"}
+
+        if client_address not in subscriptions[item_name]:
+            return {"type": "UNSUBSCRIBE-FAILED", "rq#": rq_number, "reason": "You are not subscribed to this item"}
+
+        subscriptions[item_name].remove(client_address)
+        return {"type": "UNSUBSCRIBED", "rq#": rq_number}
 
 
 def get_registered_clients():
@@ -98,7 +123,7 @@ def handle_client(message, client_address, server_socket):
         print(f"Received message from {client_address}: {data}")
 
         if data["type"] == "REGISTER":
-            response = process_registration(data, client_address)
+            response = process_registration(data, client_address,server_socket)
         elif data["type"] == "DE-REGISTER":
             response = process_deregistration(data)
         elif data["type"] == "SHOW-CLIENTS":
@@ -106,7 +131,9 @@ def handle_client(message, client_address, server_socket):
         elif data["type"] == "LIST_ITEM":
             response = list_item(data, server_socket)
         elif data["type"] == "SUBSCRIBE":
-            response = process_subscription(data, client_address)
+            response = process_subscription(data, client_address,server_socket)
+        elif data["type"] == "DE-SUBSCRIBE":
+            response = process_unsubscribe(data, client_address)
         else:
             response = {"type": "ERROR", "rq#": data.get("rq#", 0), "reason": "Invalid request"}
 
@@ -162,25 +189,31 @@ def list_item(data, server_socket):
         return {"type": "LIST-DENIED", "rq#": rq_number, "reason": "Invalid fields, please review your listing."}
     
     with lock:
-        if item_name in items_auctions:
-            return {"type": "LIST-DENIED", "rq#": rq_number, "reason": "Item already listed"}
-    
-       # If everything is correct, store the item
-        items_auctions[item_name] = {
+    # Initialize item list if needed
+        if item_name not in items_auctions:
+            items_auctions[item_name] = []
+
+        # Generate unique RQ# for this auction announcement
+        announcement_rq = random.randint(1000, 9999)
+
+        # Add new auction listing to the list
+        new_auction = {
             "description": item_description,
             "start_price": start_price,
             "duration": duration,
             "current_price": start_price,
-            "start_time": threading.Timer(duration, lambda: None)
+            "announcement_rq": announcement_rq
         }
 
-        print(f"Item '{item_name}' listed for auction. Notifying subscribers...")
+        items_auctions[item_name].append(new_auction)
 
-        # For announcements
+        print(f"Item '{item_name}' listed by seller. Sending AUCTION_ANNOUNCE to subscribers...")
+
+        # Send announcement to subscribers of this item name
         if item_name in subscriptions:
             message = {
                 "type": "AUCTION_ANNOUNCE",
-                "rq#": random.randint(1000, 9999),  # can be any server-generated number
+                "rq#": announcement_rq,
                 "item_name": item_name,
                 "description": item_description,
                 "current_price": start_price,
@@ -194,7 +227,7 @@ def list_item(data, server_socket):
                     server_socket.sendto(msg_encoded, subscriber_address)
                     print(f"Sent AUCTION_ANNOUNCE to {subscriber_address}")
                 except Exception as e:
-                    print(f"Failed to send AUCTION_ANNOUNCE to {subscriber_address}: {e}")
+                    print(f"Failed to send to {subscriber_address}: {e}")
 
 
         return {"type": "ITEM_LISTED", "rq#": rq_number}

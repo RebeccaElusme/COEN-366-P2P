@@ -3,6 +3,7 @@ import socket
 import json
 import re
 import sys
+import time
 
 
 class AuctionClient:
@@ -173,48 +174,82 @@ class AuctionClient:
 
     #########################################################
 
+#################### UNSUBSCRIBE FROM ANNOUNCEMENTS ##########
+    def send_unsubscribe_request(self):
+            if self.role != "Buyer":
+                print("Only buyers can unsubscribe from items.")
+                return
 
-############## To handle responses from server ###########
+            item_name = input("Enter the item name to unsubscribe from: ").strip()
+            if not item_name:
+                print("Item name cannot be empty.")
+                return
+
+            self.rq_counter += 1
+            request = {
+                "type": "DE-SUBSCRIBE",
+                "rq#": self.rq_counter,
+                "item_name": item_name
+            }
+
+            self.udp_socket.sendto(json.dumps(request).encode(), self.server_address)
+            print("Sent DE-SUBSCRIBE request:", request)
+
+    ################################################################
+
+    ############## To handle responses from server #################
     def handle_server_response(self, response_data):
-            rqt = response_data.get("rq#", "Unknown")
-            msg_type = response_data.get("type", "UNKNOWN")
+                rqt = response_data.get("rq#", "Unknown")
+                msg_type = response_data.get("type", "UNKNOWN")
 
-            if msg_type == "REGISTERED":
-                print(f"Registered successfully (RQ# {rqt})")
-            elif msg_type == "REGISTER-DENIED":
-                print(f"Registration failed (RQ# {rqt}): {response_data.get('reason', 'Unknown error')}")
-            elif msg_type == "DE-REGISTERED":
-                print(f"De-registered successfully (RQ# {rqt})")
-            elif msg_type == "CLIENT-LIST":
-                print("\nRegistered Clients:")
-                for client in response_data.get("clients", []):
-                    print(f"- {client.get('name')} ({client.get('role')})")
-            elif msg_type == "ITEM_LISTED":
-                print(f"Item listed successfully (RQ# {rqt})")
-            elif msg_type == "LIST-DENIED":
-                print("Item listing denied (RQ# {rqt}):", response_data.get('reason'))
-            elif msg_type == "SUBSCRIBED":
-                print(f"Subscribed successfully (RQ# {rqt})")
-            elif msg_type == "SUBSCRIPTION-DENIED":
-                print(f"Subscription failed (RQ# {rqt}): {response_data.get('reason')}")
-            elif msg_type == "AUCTION_ANNOUNCE":
-                print("\n AUCTION ANNOUNCEMENT:")
-                print(f"Item: {response_data.get('item_name')}")
-                print(f"Description: {response_data.get('description')}")
-                print(f"Current Price: {response_data.get('current_price')}")
-                print(f"Time Left: {response_data.get('time_left')}s")
+                if msg_type == "REGISTERED":
+                    print(f"Registered successfully (RQ# {rqt})")
+                elif msg_type == "REGISTER-DENIED":
+                    print(f"Registration failed (RQ# {rqt}): {response_data.get('reason', 'Unknown error')}")
+                elif msg_type == "DE-REGISTERED":
+                    print(f"De-registered successfully (RQ# {rqt})")
+                elif msg_type == "CLIENT-LIST":
+                    print("\nRegistered Clients:")
+                    for client in response_data.get("clients", []):
+                        print(f"- {client.get('name')} ({client.get('role')})")
+                elif msg_type == "ITEM_LISTED":
+                    print(f"Item listed successfully (RQ# {rqt})")
+                elif msg_type == "LIST-DENIED":
+                    print("Item listing denied (RQ# {rqt}):", response_data.get('reason'))
+                elif msg_type == "SUBSCRIBED":
+                    print(f"Subscribed successfully (RQ# {rqt})")
+                elif msg_type == "SUBSCRIPTION-DENIED":
+                    print(f"Subscription failed (RQ# {rqt}): {response_data.get('reason')}")
+                elif msg_type == "UNSUBSCRIBED":
+                    print(f"Unsubscribed successfully (RQ# {rqt})")
+                elif msg_type == "UNSUBSCRIBE-FAILED":
+                    print(f"Unsubscribe failed (RQ# {rqt}): {response_data.get('reason')}")
+                elif msg_type == "AUCTION_ANNOUNCE":
+                    print("\n AUCTION ANNOUNCEMENT:")
+                    print(f"Item: {response_data.get('item_name')}")
+                    print(f"Description: {response_data.get('description')}")
+                    print(f"Current Price: {response_data.get('current_price')}")
+                    print(f"Time Left: {response_data.get('time_left')}s")
 
-            else:
-                print("Unknown response:", response_data)
+                else:
+                    print("Unknown response:", response_data)
 
-    #####################################################
+##############################################################
  # Run client
 if __name__ == "__main__":
     try:
         client = AuctionClient()
         
         while True:
-            print("\nOptions:\n1. Register\n2. De-register\n3. Show List of Clients\n4. List Item (Sellers Only)\n5.Subscribe to Item Announcement(Buyer)\n6. Exit")
+            time.sleep(0.5)
+            print("\nOptions:")
+            print("1. Register")
+            print("2. De-register")
+            print("3. Show List of Clients")
+            print("4. List Item (Sellers Only)")
+            print("5. Subscribe to Item Announcement (Buyer)")
+            print("6. Unsubscribe from Item (Buyer)")
+            print("7. Exit")
             choice = input("Enter your choice: ").strip()
 
             if choice == "1":
@@ -228,9 +263,12 @@ if __name__ == "__main__":
             elif choice == "5":
                 client.send_subscribe_request()
             elif choice == "6":
+                client.send_unsubscribe_request()
+            elif choice == "7":
                 print("Exiting client...")
                 client.close_socket()
                 sys.exit(0)
+
             else:
                 print("Invalid option, please try again.")
     except KeyboardInterrupt:
