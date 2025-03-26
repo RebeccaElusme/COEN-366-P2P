@@ -10,10 +10,11 @@ class AuctionClient:
     #Class initialization
     def __init__(self):
         
-        name = input("Enter name: ").strip()
-        while not name.isalpha():
-            print("Invalid name. Try again.")
-            name = input("Enter name: ").strip()
+        self.name = input("Enter name: ").strip()
+        while not self.name.isalpha():
+                print("Invalid name. Try again.")
+                self.name = input("Enter name: ").strip()
+
 
         self.role = self.get_valid_role()
         self.rq_counter = 0
@@ -269,6 +270,14 @@ class AuctionClient:
                     print(f"Description: {response_data.get('description')}")
                     print(f"Current Price: {response_data.get('current_price')}")
                     print(f"Time Left: {response_data.get('time_left')}s")
+                    print(f"RQ#: {response_data.get('rq#')}")
+                elif msg_type == "BID_UPDATE":
+                    print("\nBID UPDATE:")
+                    print(f"Item: {response_data.get('item_name')}")
+                    print(f"Highest Bid: {response_data.get('highest_bid')}")
+                    print(f"Bidder: {response_data.get('bidder_name')}")
+                    print(f"Time Left: {response_data.get('time_left')}s")
+
 
                 else:
                     print("Unknown response:", response_data)

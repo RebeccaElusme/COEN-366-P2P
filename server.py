@@ -134,6 +134,10 @@ def handle_client(message, client_address, server_socket):
             response = process_subscription(data, client_address,server_socket)
         elif data["type"] == "DE-SUBSCRIBE":
             response = process_unsubscribe(data, client_address)
+        elif data["type"] == "BID":
+            response = process_bid(data, client_address, server_socket)
+            if response:  # Only send response if it's not None (e.g., for BID_REJECTED)
+                server_socket.sendto(json.dumps(response).encode(), client_address)
         else:
             response = {"type": "ERROR", "rq#": data.get("rq#", 0), "reason": "Invalid request"}
 
