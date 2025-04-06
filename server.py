@@ -21,7 +21,7 @@ items_auctions = {}
 #Subscriptions for the announcements 
 subscriptions = {}
 
-def process_registration(data, client_address):
+def process_registration(data, client_address, server_socket):
     """Handles the REGISTER request with validation."""
     name = data["name"].strip().lower()
     role = data["role"].strip().capitalize()

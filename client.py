@@ -10,7 +10,7 @@ class AuctionClient:
     #Class initialization
     def __init__(self):
         
-        self.name = input("Enter name: ").strip()
+        self.name = input("Enter name: ").strip().lower()
         while not self.name.isalpha():
                 print("Invalid name. Try again.")
                 self.name = input("Enter name: ").strip()
@@ -238,6 +238,51 @@ class AuctionClient:
 
 ######################################################################
 
+################################### NEGOTATION REQUEST #################
+
+    def handle_negotiate_request(self, response_data):
+        item_name = response_data.get("item_name")
+        current_price = response_data.get("current_price")
+        time_left = response_data.get("time_left")
+        rq_number = response_data.get("rq#")
+
+        print("\n[NEGOTIATION REQUEST]")
+        print(f"Item: {item_name}")
+        print(f"Current Price: {current_price}")
+        print(f"Time Left: {time_left}s")
+        print(f"RQ#: {rq_number}")
+
+        if self.role == "Seller":
+            decision = input("Do you want to lower the price? (yes/no): ").strip().lower()
+            if decision == "yes":
+                try:
+                    new_price = float(input("Enter new price: ").strip())
+                    response = {
+                        "type": "ACCEPT",
+                        "rq#": rq_number,
+                        "item_name": item_name,
+                        "new_price": new_price
+                    }
+                except ValueError:
+                    print("Invalid price entered. Sending REFUSE.")
+                    response = {
+                        "type": "REFUSE",
+                        "rq#": rq_number,
+                        "item_name": item_name,
+                        "response": "REJECT"
+                    }
+            else:
+                response = {
+                    "type": "REFUSE",
+                    "rq#": rq_number,
+                    "item_name": item_name,
+                    "response": "REJECT"
+                }
+
+            self.udp_socket.sendto(json.dumps(response).encode(), self.server_address)
+
+
+##########################################################################
 
 #################### To handle responses from server #################
     def handle_server_response(self, response_data):
@@ -284,8 +329,13 @@ class AuctionClient:
                     print(f"BID ACCEPTED (RQ# {rqt})")
                 elif msg_type == "BID_REJECTED":
                     print(f"BID REJECTED (RQ# {rqt}): {response_data.get('reason')}")
-
-
+                elif msg_type == "NEGOTIATE_REQ":
+                    print("\n[NEGOTIATION REQUEST]")
+                    print(f"Item: {response_data.get('item_name')}")
+                    print(f"Current Price: {response_data.get('current_price')}")
+                    print(f"Time Left: {response_data.get('time_left')}s")
+                    print(f"RQ#: {rqt}")
+                    self.handle_negotiate_request(response_data)
                 else:
                     print("Unknown response:", response_data)
 
