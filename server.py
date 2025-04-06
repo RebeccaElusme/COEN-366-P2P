@@ -23,7 +23,7 @@ subscriptions = {}
 
 def process_registration(data, client_address):
     """Handles the REGISTER request with validation."""
-    name = data["name"].strip()
+    name = data["name"].strip().lower()
     role = data["role"].strip().capitalize()
     udp_port = data["udp_port"]
     tcp_port = data["tcp_port"]
@@ -205,7 +205,7 @@ def list_item(data, server_socket):
             "duration": duration,
             "current_price": start_price,
             "announcement_rq": announcement_rq,
-            "seller": data.get("name")
+            "seller": data.get("name").strip().lower()
         }
 
         items_auctions[item_name].append(new_auction)
@@ -320,10 +320,11 @@ def auction_timer(item_name, rq_number, duration, server_socket):
                 if auction["announcement_rq"] == rq_number:
                     auction["duration"] = time_left
 
-                    # Send negotiation request once, after halfway, if no bid
                     if not auction.get("negotiation_sent") and time_left <= (duration // 2) and "highest_bidder" not in auction:
+                        print(f"[DEBUG] Sending NEGOTIATE_REQ for {item_name} at time_left={time_left}")
+
                         auction["negotiation_sent"] = True
-                        seller_name = auction.get("seller")
+                        seller_name = auction.get("seller", "").strip().lower()
                         if seller_name and seller_name in registered_clients:
                             seller = registered_clients[seller_name]
                             seller_addr = (seller["ip"], seller["udp_port"])
@@ -335,9 +336,10 @@ def auction_timer(item_name, rq_number, duration, server_socket):
                                 "current_price": auction["current_price"],
                                 "time_left": time_left
                             }
-                            auction["negotiation_sent"] = True
                             server_socket.sendto(json.dumps(negotiate_req).encode(), seller_addr)
                             print(f"Sent NEGOTIATE_REQ to seller {seller_name}")
+                    else:
+                        print(f"[DEBUG] Skipping NEGOTIATE_REQ for {item_name}: sent={auction.get('negotiation_sent')}, bidder={auction.get('highest_bidder')}, time_left={time_left}")
 
         if time_left == 0:
             print(f"Auction for '{item_name}' (RQ# {rq_number}) ended.")

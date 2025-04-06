@@ -127,11 +127,13 @@ class AuctionClient:
                 request = {
                     "type": "LIST_ITEM",
                     "rq#": self.rq_counter,
+                    "name": self.name,  # <-- Add this line
                     "item_name": item_name,
                     "item_description": item_description,
                     "start_price": start_price,
                     "duration": duration
                 }
+
 
                 message = json.dumps(request).encode()
                 self.udp_socket.sendto(message, self.server_address)
