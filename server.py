@@ -136,8 +136,10 @@ def handle_client(message, client_address, server_socket):
             response = process_unsubscribe(data, client_address)
         elif data["type"] == "BID":
             response = process_bid(data, client_address, server_socket)
-            if response:  # Only send response if it's not None (e.g., for BID_REJECTED)
+            if response:
                 server_socket.sendto(json.dumps(response).encode(), client_address)
+            return  # Prevent sending 'None' below for this BID case
+
         else:
             response = {"type": "ERROR", "rq#": data.get("rq#", 0), "reason": "Invalid request"}
 
@@ -188,19 +190,15 @@ def list_item(data, server_socket):
     start_price = data.get("start_price")
     duration = data.get("duration")
 
-
     if not all([item_name, item_description, isinstance(start_price, (int, float)), isinstance(duration, int)]):
         return {"type": "LIST-DENIED", "rq#": rq_number, "reason": "Invalid fields, please review your listing."}
-    
+
     with lock:
-    # Initialize item list if needed
         if item_name not in items_auctions:
             items_auctions[item_name] = []
 
-        # Generate unique RQ# for this auction announcement
         announcement_rq = random.randint(1000, 9999)
 
-        # Add new auction listing to the list
         new_auction = {
             "description": item_description,
             "start_price": start_price,
@@ -208,14 +206,12 @@ def list_item(data, server_socket):
             "current_price": start_price,
             "announcement_rq": announcement_rq,
             "seller": data.get("name")
-
         }
 
         items_auctions[item_name].append(new_auction)
 
         print(f"Item '{item_name}' listed by seller. Sending AUCTION_ANNOUNCE to subscribers...")
 
-        # Send announcement to subscribers of this item name
         if item_name in subscriptions:
             message = {
                 "type": "AUCTION_ANNOUNCE",
@@ -225,9 +221,7 @@ def list_item(data, server_socket):
                 "current_price": start_price,
                 "time_left": duration
             }
-
             msg_encoded = json.dumps(message).encode()
-
             for subscriber_address in subscriptions[item_name]:
                 try:
                     server_socket.sendto(msg_encoded, subscriber_address)
@@ -235,8 +229,14 @@ def list_item(data, server_socket):
                 except Exception as e:
                     print(f"Failed to send to {subscriber_address}: {e}")
 
+    #### Lancement du thread 
+    threading.Thread(
+        target=auction_timer,
+        args=(item_name, announcement_rq, duration, server_socket),
+        daemon=True
+    ).start()
 
-        return {"type": "ITEM_LISTED", "rq#": rq_number}
+    return {"type": "ITEM_LISTED", "rq#": rq_number}
 
 ###################### PROCESSE BID ############################
 
@@ -305,6 +305,44 @@ def process_bid(data, client_address, server_socket):
 
 
 ################################################################
+def auction_timer(item_name, rq_number, duration, server_socket):
+    import time
+
+    time_left = duration
+
+    for _ in range(duration):
+        time.sleep(1)
+        time_left -= 1
+
+        with lock:
+            auction_list = items_auctions.get(item_name, [])
+            for auction in auction_list:
+                if auction["announcement_rq"] == rq_number:
+                    auction["duration"] = time_left
+
+                    # Send negotiation request once, after halfway, if no bid
+                    if not auction.get("negotiation_sent") and time_left <= (duration // 2) and "highest_bidder" not in auction:
+                        auction["negotiation_sent"] = True
+                        seller_name = auction.get("seller")
+                        if seller_name and seller_name in registered_clients:
+                            seller = registered_clients[seller_name]
+                            seller_addr = (seller["ip"], seller["udp_port"])
+
+                            negotiate_req = {
+                                "type": "NEGOTIATE_REQ",
+                                "rq#": rq_number,
+                                "item_name": item_name,
+                                "current_price": auction["current_price"],
+                                "time_left": time_left
+                            }
+                            auction["negotiation_sent"] = True
+                            server_socket.sendto(json.dumps(negotiate_req).encode(), seller_addr)
+                            print(f"Sent NEGOTIATE_REQ to seller {seller_name}")
+
+        if time_left == 0:
+            print(f"Auction for '{item_name}' (RQ# {rq_number}) ended.")
+
+
 # Run server
 if __name__ == "__main__":
     stop_event = threading.Event()

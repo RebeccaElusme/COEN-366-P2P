@@ -277,6 +277,11 @@ class AuctionClient:
                     print(f"Highest Bid: {response_data.get('highest_bid')}")
                     print(f"Bidder: {response_data.get('bidder_name')}")
                     print(f"Time Left: {response_data.get('time_left')}s")
+                    print(f"RQ#: {rqt}")
+                elif msg_type == "BID_ACCEPTED":
+                    print(f"BID ACCEPTED (RQ# {rqt})")
+                elif msg_type == "BID_REJECTED":
+                    print(f"BID REJECTED (RQ# {rqt}): {response_data.get('reason')}")
 
 
                 else:
