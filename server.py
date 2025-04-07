@@ -68,7 +68,7 @@ def process_deregistration(data):
     return response
 
 def process_subscription(data, client_address,server_socket):
-    item_name = data.get("item_name")
+    item_name = data.get("item_name").strip().lower()
     rq_number = data.get("rq#")
 
     with lock:
@@ -95,7 +95,7 @@ def process_subscription(data, client_address,server_socket):
     return {"type": "SUBSCRIBED", "rq#": rq_number}
 
 def process_unsubscribe(data, client_address):
-    item_name = data.get("item_name")
+    item_name = data.get("item_name").strip().lower()
     rq_number = data.get("rq#")
 
     with lock:
@@ -186,16 +186,23 @@ def start_tcp_server(stop_event):
             server_socket.settimeout(1)
             try:
                 client_socket, client_address = server_socket.accept()
+                print(f"[TCP] Connection from {client_address}")
+                
+                # Add this to receive and print the message
+                data = client_socket.recv(1024)
+                print(f"[TCP] Received: {data.decode()}")
+
                 client_socket.close()
             except socket.timeout:
                 continue
     finally:
         server_socket.close()
 
+
 # List items for request from sellers
 def list_item(data, server_socket):
     rq_number = data.get("rq#")
-    item_name = data.get("item_name")
+    item_name = data.get("item_name").strip().lower()
     item_description = data.get("item_description")
     start_price = data.get("start_price")
     duration = data.get("duration")
@@ -252,7 +259,7 @@ def list_item(data, server_socket):
 
 def process_bid(data, client_address, server_socket):
     rq_number = data.get("rq#")
-    item_name = data.get("item_name")
+    item_name = data.get("item_name").strip().lower()
     bid_amount = data.get("bid_amount")
     bidder_name = data.get("bidder_name")
 
@@ -386,8 +393,69 @@ def auction_timer(item_name, rq_number, duration, server_socket):
                     else:
                         print(f"[DEBUG] Skipping NEGOTIATE_REQ for {item_name}: sent={auction.get('negotiation_sent')}, bidder={auction.get('highest_bidder')}, time_left={time_left}")
 
-        if time_left == 0:
-            print(f"Auction for '{item_name}' (RQ# {rq_number}) ended.")
+    # When the auction ends 
+    print(f"Auction for '{item_name}' (RQ# {rq_number}) ended.")
+
+    auction_list = items_auctions.get(item_name, [])
+    for auction in auction_list:
+        if auction["announcement_rq"] != rq_number:
+            continue
+
+        if "highest_bidder" in auction:
+            buyer_name = auction["highest_bidder"]
+            seller_name = auction["seller"]
+            final_price = auction["current_price"]
+
+            buyer_info = registered_clients.get(buyer_name.lower())
+            seller_info = registered_clients.get(seller_name.lower())
+
+            if buyer_info:
+                try:
+                    with socket.create_connection((buyer_info["ip"], buyer_info["tcp_port"]), timeout=5) as sock:
+                        winner_msg = {
+                            "type": "WINNER",
+                            "rq#": rq_number,
+                            "item_name": item_name,
+                            "final_price": final_price,
+                            "seller_name": seller_info["name"]
+                        }
+                        sock.sendall(json.dumps(winner_msg).encode())
+                        print(f"[TCP] Sent WINNER to {buyer_name}")
+                except Exception as e:
+                    print(f"[TCP] Failed to send WINNER to {buyer_name}: {e}")
+
+            if seller_info:
+                try:
+                    with socket.create_connection((seller_info["ip"], seller_info["tcp_port"]), timeout=5) as sock:
+                        sold_msg = {
+                            "type": "SOLD",
+                            "rq#": rq_number,
+                            "item_name": item_name,
+                            "final_price": final_price,
+                            "buyer_name": buyer_info["name"]
+                        }
+                        sock.sendall(json.dumps(sold_msg).encode())
+                        print(f"[TCP] Sent SOLD to {seller_name}")
+                except Exception as e:
+                    print(f"[TCP] Failed to send SOLD to {seller_name}: {e}")
+
+        else:
+            # No one bid — notify seller
+            seller_name = auction["seller"]
+            seller_info = registered_clients.get(seller_name.lower())
+
+            if seller_info:
+                try:
+                    with socket.create_connection((seller_info["ip"], seller_info["tcp_port"]), timeout=5) as sock:
+                        no_sale_msg = {
+                            "type": "NO_SALE",
+                            "rq#": rq_number,
+                            "item_name": item_name
+                        }
+                        sock.sendall(json.dumps(no_sale_msg).encode())
+                        print(f"[TCP] Sent NO_SALE to {seller_name}")
+                except Exception as e:
+                    print(f"[TCP] Failed to send NO_SALE to {seller_name}: {e}")
 
 
 # Run server

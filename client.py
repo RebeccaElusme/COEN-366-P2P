@@ -37,6 +37,9 @@ class AuctionClient:
 
         threading.Thread(target=self.listen_for_messages, daemon=True).start()
 
+        # Start TCP listener thread
+        threading.Thread(target=self.listen_for_tcp_messages, daemon=True).start()
+
     
 
     def get_valid_role(self):
@@ -291,10 +294,63 @@ class AuctionClient:
             self.udp_socket.sendto(json.dumps(response).encode(), self.server_address)
             self.awaiting_negotiation_input = False  # Unblock menu
 
+######################### LISTENING FOR TCP 2.6 #########################
+    def listen_for_tcp_messages(self):
+        self.tcp_socket.listen(5)
+        print(f"[TCP] Listening for server messages on TCP port {self.tcp_port}...")
+
+        while self.running:
+            try:
+                self.tcp_socket.settimeout(1)
+                conn, addr = self.tcp_socket.accept()
+                with conn:
+                    data = conn.recv(1024)
+                    if not data:
+                        continue
+
+                    try:
+                        message = json.loads(data.decode())
+                        self.handle_tcp_message(message)
+                    except json.JSONDecodeError:
+                        print("[TCP] Received malformed JSSON from server.")
+            except socket.timeout:
+                continue
+            except Exception as e:
+                print(f"[TCP] Error receiving TCP message: {e}")
+
 
 ##########################################################################
 
-#################### To handle responses from server #################
+################################## Handle TCP messages from server
+
+    def handle_tcp_message(self, message):
+        msg_type = message.get("type")
+        rq = message.get("rq#", "Unknown")
+
+        if msg_type == "WINNER":
+            print("\n[TCP]  YOU ARE THE WINNER ")
+            print(f"Item: {message['item_name']}")
+            print(f"Final Price: {message['final_price']}")
+            print(f"Seller: {message['seller_name']}")
+            print(f"RQ#: {rq}")
+
+        elif msg_type == "SOLD":
+            print("\n[TCP] Your item was SOLD.")
+            print(f"Item: {message['item_name']}")
+            print(f"Final Price: {message['final_price']}")
+            print(f"Buyer: {message['buyer_name']}")
+            print(f"RQ#: {rq}")
+
+        elif msg_type == "NO_SALE":
+            print("\n[TCP] Your auction ended with no bids.")
+            print(f"Item: {message['item_name']}")
+            print(f"RQ#: {rq}")
+
+        else:
+            print("[TCP] Unknown message received:")
+            print(message)
+
+#################### To handle UDP responses from server #################
     def handle_server_response(self, response_data):
                 rqt = response_data.get("rq#", "Unknown")
                 msg_type = response_data.get("type", "UNKNOWN")
@@ -352,6 +408,19 @@ class AuctionClient:
                 else:
                     print("Unknown response:", response_data)
 
+    def send_tcp_test(self):
+        try:
+            with socket.create_connection(("127.0.0.1", 6000), timeout=5) as sock:
+                message = {
+                    "type": "TCP_TEST",
+                    "name": self.name
+                }
+                sock.sendall(json.dumps(message).encode())
+                print("Sent TCP test message to server.")
+        except Exception as e:
+            print(f"TCP test failed: {e}")
+
+
 ##############################################################
  # Run client
 if __name__ == "__main__":
@@ -372,6 +441,7 @@ if __name__ == "__main__":
             print("6. Unsubscribe from Item (Buyer)")
             print("7. Place a Bid (Buyer)")
             print("8. Exit")
+            print("9. Send TCP Test Message")
 
             choice = input("Enter your choice: ").strip()
 
@@ -393,7 +463,8 @@ if __name__ == "__main__":
                 print("Exiting client...")
                 client.close_socket()
                 sys.exit(0)
-
+            elif choice == "9":
+                 client.send_tcp_test()
             else:
                 print("Invalid option, please try again.")
     except KeyboardInterrupt:
