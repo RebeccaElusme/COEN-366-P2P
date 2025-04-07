@@ -139,6 +139,16 @@ def handle_client(message, client_address, server_socket):
             if response:
                 server_socket.sendto(json.dumps(response).encode(), client_address)
             return  # Prevent sending 'None' below for this BID case
+        elif data["type"] == "ACCEPT":
+            response = process_accept(data, server_socket)
+            if response:
+                server_socket.sendto(json.dumps(response).encode(), client_address)
+            return
+
+        elif data["type"] == "REFUSE":
+            print(f"Seller refused negotiation for item '{data.get('item_name')}' (RQ# {data.get('rq#')})")
+            return
+
 
         else:
             response = {"type": "ERROR", "rq#": data.get("rq#", 0), "reason": "Invalid request"}
@@ -268,6 +278,13 @@ def process_bid(data, client_address, server_socket):
                 "rq#": rq_number,
                 "reason": f"Bid must be higher than current price ({matching_auction['current_price']})"
             }
+        
+        if matching_auction["duration"] <= 0:
+            return {
+                "type": "BID_REJECTED",
+                "rq#": rq_number,
+                "reason": "Auction has ended, no more bids accepted !"
+            }
 
         # Accept bid
         matching_auction["current_price"] = bid_amount
@@ -302,6 +319,34 @@ def process_bid(data, client_address, server_socket):
 
         print(f"Accepted bid from {bidder_name} on '{item_name}' for {bid_amount}")
         return None  # No need to send further response here
+
+###### Process Negotation ####
+def process_accept(data, server_socket):
+    rq_number = data.get("rq#")
+    item_name = data.get("item_name")
+    new_price = data.get("new_price")
+
+    with lock:
+        auction_list = items_auctions.get(item_name, [])
+        for auction in auction_list:
+            if auction["announcement_rq"] == rq_number:
+                auction["current_price"] = new_price
+
+                # Notify all subscribers
+                adjustment = {
+                    "type": "PRICE_ADJUSTMENT",
+                    "rq#": rq_number,
+                    "item_name": item_name,
+                    "new_price": new_price,
+                    "time_left": auction["duration"]
+                }
+
+                message = json.dumps(adjustment).encode()
+                for sub in subscriptions.get(item_name, []):
+                    server_socket.sendto(message, sub)
+
+                print(f"Price adjusted for '{item_name}' to {new_price}, sent to all subscribers.")
+                return {"type": "ACCEPT_CONFIRMED", "rq#": rq_number}
 
 
 ################################################################
