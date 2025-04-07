@@ -344,6 +344,60 @@ def auction_timer(item_name, rq_number, duration, server_socket):
         if time_left == 0:
             print(f"Auction for '{item_name}' (RQ# {rq_number}) ended.")
 
+def auction_closure(item_name, rq_number, server_socket):
+    """Handles the closure of an auction, notifying the winner and the seller."""
+    # Get the auction details
+    auction_list = items_auctions.get(item_name, [])
+    if not auction_list:
+        print(f"No auction found for item {item_name}.")
+        return
+    
+    # Find the auction for the specific RQ#
+    winning_bid = None
+    seller_name = None
+    for auction in auction_list:
+        if auction["announcement_rq"] == rq_number:
+            seller_name = auction["seller"]
+            winning_bid = auction.get("current_price")
+            highest_bidder = auction.get("highest_bidder")
+            break
+
+    # Case when no bids were placed
+    if not winning_bid:
+        # Send NON_OFFER message to seller
+        message = {
+            "type": "NON_OFFER",
+            "rq#": rq_number,
+            "item_name": item_name
+        }
+        server_socket.sendto(json.dumps(message).encode(), registered_clients[seller_name]["tcp_address"])
+        print(f"Sent NON_OFFER to seller {seller_name}.")
+        return
+
+    # Send WINNER message to the highest bidder (buyer)
+    buyer_name = highest_bidder
+    winner_message = {
+        "type": "WINNER",
+        "rq#": rq_number,
+        "item_name": item_name,
+        "final_price": winning_bid,
+        "seller_name": seller_name
+    }
+    buyer_address = (registered_clients[buyer_name]["ip"], registered_clients[buyer_name]["tcp_port"])
+    server_socket.sendto(json.dumps(winner_message).encode(), buyer_address)
+    print(f"Sent WINNER message to {buyer_name}.")
+
+    # Send SOLD message to the seller
+    seller_address = (registered_clients[seller_name]["ip"], registered_clients[seller_name]["tcp_port"])
+    sold_message = {
+        "type": "SOLD",
+        "rq#": rq_number,
+        "item_name": item_name,
+        "final_price": winning_bid,
+        "buyer_name": buyer_name
+    }
+    server_socket.sendto(json.dumps(sold_message).encode(), seller_address)
+    print(f"Sent SOLD message to seller {seller_name}.")
 
 # Run server
 if __name__ == "__main__":

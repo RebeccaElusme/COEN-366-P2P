@@ -180,6 +180,21 @@ class GUIAuctionClient:
             except socket.timeout:
                 continue
 
+
+    def handle_auction_closure_response(self, response_data):
+        """Handle the WINNER, SOLD, or NON_OFFER responses."""
+        msg_type = response_data.get("type")
+    
+        if msg_type == "WINNER":
+            print(f"\nAuction won by you! {response_data['item_name']} - Final Price: {response_data['final_price']}")
+            print(f"Seller: {response_data['seller_name']}")
+        elif msg_type == "SOLD":
+            print(f"\nItem sold! {response_data['item_name']} - Final Price: {response_data['final_price']}")
+            print(f"Buyer: {response_data['buyer_name']}")
+        elif msg_type == "NON_OFFER":
+            print(f"\nNo bids for {response_data['item_name']}. Auction closed without sale.")
+
+
     def handle_server_response(self, data):
         msg_type = data.get("type", "UNKNOWN")
         self.log_message(f"RECV [{msg_type}]: {json.dumps(data, indent=2)}")

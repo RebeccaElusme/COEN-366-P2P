@@ -91,6 +91,20 @@ class AuctionClient:
                 continue  # just keep waiting
             except (json.JSONDecodeError, ConnectionResetError):
                 print("Error receiving or decoding server message.")
+                
+    def listen_for_tcp_messages(self):
+        """Listen for TCP messages from the server after the auction ends."""
+        while self.running:
+            try:
+                self.tcp_socket.settimeout(1)  # Non-blocking wait
+                response = self.tcp_socket.recv(1024)
+                response_data = json.loads(response.decode())
+                self.handle_auction_closure_response(response_data)
+            except socket.timeout:
+                continue
+            except (json.JSONDecodeError, ConnectionResetError):
+                 print("Error receiving or decoding server message.")
+
 
 ## To close clinet socket
     def close_socket(self):
