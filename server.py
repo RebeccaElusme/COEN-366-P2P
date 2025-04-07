@@ -461,7 +461,7 @@ def auction_closure(item_name, rq_number, server_socket):
         # Send NON_OFFER message to seller using TCP
         message = {
             "type": "NON_OFFER",
-            "rq#": rq_number,
+            "rq#": "RQ#: " + str(rq_number),
             "item_name": item_name
         }
         success = tcp_send_message(seller_name, message)
@@ -472,10 +472,10 @@ def auction_closure(item_name, rq_number, server_socket):
     # Send WINNER message to the highest bidder (buyer) using TCP
     winner_message = {
         "type": "WINNER",
-        "rq#": rq_number,
-        "item_name": item_name,
-        "final_price": winning_bid,
-        "seller_name": seller_name
+        "rq#": "RQ#: "+ str(rq_number),
+        "item_name": "ITEM: " + item_name,
+        "final_price": "Final Price: "+ str(winning_bid),
+        "seller_name": "Seller Name: " + seller_name
     }
     success = tcp_send_message(highest_bidder, winner_message)
     if success:
@@ -484,10 +484,10 @@ def auction_closure(item_name, rq_number, server_socket):
     # Send SOLD message to the seller using TCP
     sold_message = {
         "type": "SOLD",
-        "rq#": rq_number,
-        "item_name": item_name,
-        "final_price": winning_bid,
-        "buyer_name": highest_bidder
+        "rq#": "RQ#: "+ str(rq_number),
+        "item_name": "ITEM: " + item_name,
+        "final_price": "Final Price: "+ str(winning_bid),
+        "buyer_name": "Buyer Name: "+ highest_bidder
     }
     success = tcp_send_message(seller_name, sold_message)
     if success:
@@ -498,10 +498,10 @@ def auction_closure(item_name, rq_number, server_socket):
         if bidder != highest_bidder:
             loser_message = {
                 "type": "LOSER",
-                "rq#": rq_number,
-                "item_name": item_name,
-                "winner_final_price": winning_bid,
-                "winner_name": highest_bidder
+                "rq#": "RQ#: "+ str(rq_number),
+                "item_name": "ITEM: " + item_name,
+                "winner_final_price": "Final Price: "+ str(winning_bid),
+                "winner_name": "Winner name: " + highest_bidder
             }
             tcp_send_message(bidder, loser_message)
             print(f"Sent LOSER notification to {bidder}.")
