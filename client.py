@@ -493,7 +493,6 @@ if __name__ == "__main__":
             print("6. Unsubscribe from Item (Buyer)")
             print("7. Place a Bid (Buyer)")
             print("8. Exit")
-            print("9. Send TCP Test Message")
 
             choice = input("Enter your choice: ").strip()
 
