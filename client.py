@@ -34,6 +34,7 @@ class AuctionClient:
 
         # Controls meny display fir negotation 
         self.awaiting_negotiation_input = False  
+        self.awaiting_finalization_input = False
 
         threading.Thread(target=self.listen_for_messages, daemon=True).start()
 
@@ -166,7 +167,7 @@ class AuctionClient:
             print("Only buyers can subscribe to items.")
             return
 
-        item_name = input("Enter the item name to subscribe to: ")
+        item_name = input("Enter the item name to subscribe to: ").strip().lower()
         if not item_name:
             print("Item name cannot be empty.")
             return
@@ -345,10 +346,60 @@ class AuctionClient:
             print("\n[TCP] Your auction ended with no bids.")
             print(f"Item: {message['item_name']}")
             print(f"RQ#: {rq}")
-
+        elif msg_type == "INFORM_Req":
+            item = message.get("item_name")
+            price = message.get("final_price")
+            print(f"\n[TCP] Finalizing Purchase for item '{item}' at price ${price}")
+            self.respond_to_inform_req(message)
+        elif msg_type == "CANCEL":
+            print("\n[TCP] Transaction was CANCELLED.")
+            print(f"Reason: {message.get('reason')}")
         else:
             print("[TCP] Unknown message received:")
             print(message)
+
+    def respond_to_inform_req(self, message):
+        
+        self.awaiting_finalization_input = True
+
+        rq_number = message.get("rq#")
+        item_name = message.get("item_name")
+
+        response = {
+            "type": "INFORM_Res",
+            "rq#": rq_number,
+            "name": self.name
+        }
+
+        if self.role == "Buyer":
+            print("Please enter payment and shipping details.")
+
+            cc = input("Credit Card Number (16 digits): ").strip()
+            exp = input("Expiration Date (MM/YY): ").strip()
+            address = input("Shipping Address: ").strip()
+
+            response.update({
+                "cc#": cc,
+                "cc_exp_date": exp,
+                "address": address
+            })
+
+        else:  # Seller
+            print("Please enter your address for shipping receipt.")
+            address = input("Your Address: ").strip()
+            response["address"] = address
+
+        # Send response back to server via TCP
+        try:
+            response_port = message.get("response_port", 6000)  # fallback to 6000 if not present
+            with socket.create_connection(("127.0.0.1", response_port), timeout=5) as sock:
+
+                sock.sendall(json.dumps(response).encode())
+                print("Sent INFORM_Res back to server.")
+        except Exception as e:
+            print(f"Failed to send INFORM_Res: {e}")
+
+        self.awaiting_finalization_input = False
 
 #################### To handle UDP responses from server #################
     def handle_server_response(self, response_data):
@@ -408,18 +459,6 @@ class AuctionClient:
                 else:
                     print("Unknown response:", response_data)
 
-    def send_tcp_test(self):
-        try:
-            with socket.create_connection(("127.0.0.1", 6000), timeout=5) as sock:
-                message = {
-                    "type": "TCP_TEST",
-                    "name": self.name
-                }
-                sock.sendall(json.dumps(message).encode())
-                print("Sent TCP test message to server.")
-        except Exception as e:
-            print(f"TCP test failed: {e}")
-
 
 ##############################################################
  # Run client
@@ -429,8 +468,8 @@ if __name__ == "__main__":
         
         while True:
             time.sleep(0.5)
-            if client.awaiting_negotiation_input:
-                continue  # Skip menu while waiting for negotiation response
+            if client.awaiting_negotiation_input or client.awaiting_finalization_input:
+                continue
 
             print("\nOptions:")
             print("1. Register")

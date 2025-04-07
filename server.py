@@ -75,8 +75,12 @@ def process_subscription(data, client_address,server_socket):
         if item_name not in subscriptions:
             subscriptions[item_name] = []
 
-        if client_address not in subscriptions[item_name]:
-            subscriptions[item_name].append(client_address)
+        for addr in subscriptions[item_name]:
+            if addr == client_address:
+                return {"type": "SUBSCRIBED", "rq#": rq_number}  # Already subscribed
+
+        subscriptions[item_name].append(client_address)
+
 
         #  Send announcement now if item already here
         if item_name in items_auctions:
@@ -357,6 +361,8 @@ def process_accept(data, server_socket):
 
 
 ################################################################
+
+############ To control the durstion ahd thread time ##########
 def auction_timer(item_name, rq_number, duration, server_socket):
     import time
 
@@ -388,7 +394,15 @@ def auction_timer(item_name, rq_number, duration, server_socket):
                                 "current_price": auction["current_price"],
                                 "time_left": time_left
                             }
-                            server_socket.sendto(json.dumps(negotiate_req).encode(), seller_addr)
+                            if isinstance(server_socket, socket.socket):
+                                try:
+                                    server_socket.sendto(json.dumps(negotiate_req).encode(), seller_addr)
+                                    print(f"Sent NEGOTIATE_REQ to seller {seller_name}")
+                                except Exception as e:
+                                    print(f"[ERROR] Failed to send NEGOTIATE_REQ: {e}")
+                            else:
+                                print("[ERROR] server_socket is not a valid socket object.")
+
                             print(f"Sent NEGOTIATE_REQ to seller {seller_name}")
                     else:
                         print(f"[DEBUG] Skipping NEGOTIATE_REQ for {item_name}: sent={auction.get('negotiation_sent')}, bidder={auction.get('highest_bidder')}, time_left={time_left}")
@@ -438,7 +452,7 @@ def auction_timer(item_name, rq_number, duration, server_socket):
                         print(f"[TCP] Sent SOLD to {seller_name}")
                 except Exception as e:
                     print(f"[TCP] Failed to send SOLD to {seller_name}: {e}")
-
+            finalize_purchase(item_name, rq_number, buyer_name, seller_name, final_price)
         else:
             # No one bid — notify seller
             seller_name = auction["seller"]
@@ -456,6 +470,129 @@ def auction_timer(item_name, rq_number, duration, server_socket):
                         print(f"[TCP] Sent NO_SALE to {seller_name}")
                 except Exception as e:
                     print(f"[TCP] Failed to send NO_SALE to {seller_name}: {e}")
+
+
+
+def finalize_purchase(item_name, rq_number, buyer_name, seller_name, final_price):
+    import time
+
+    buyer = registered_clients.get(buyer_name.lower())
+    seller = registered_clients.get(seller_name.lower())
+
+    if not buyer or not seller:
+        print(f"[TCP] Missing buyer/seller info for finalization.")
+        return
+
+    # Step 1: Send INFORM_Req to both
+    inform_msg = {
+        "type": "INFORM_Req",
+        "rq#": rq_number,
+        "item_name": item_name,
+        "final_price": final_price,
+        "response_port": receiver_port  # tell client where to send INFORM_Res
+    }   
+
+
+    for user in [buyer, seller]:
+        try:
+            with socket.create_connection((user["ip"], user["tcp_port"]), timeout=5) as sock:
+                sock.sendall(json.dumps(inform_msg).encode())
+        except Exception as e:
+            print(f"[TCP] Could not send INFORM_Req to {user['name']}: {e}")
+            return  # Fail early
+
+    # Step 2: Listen for INFORM_Res responses
+    responses = {}
+
+    tcp_receiver = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    tcp_receiver.bind((SERVER_IP, 0))  # bind to any free port
+    receiver_port = tcp_receiver.getsockname()[1]  # get assigned port
+    tcp_receiver.listen(2)
+    tcp_receiver.settimeout(120)
+
+
+    print(f"[TCP] Waiting for INFORM_Res from buyer and seller...")
+
+    start = time.time()
+    while len(responses) < 2 and time.time() - start < 120:
+        try:
+            conn, _ = tcp_receiver.accept()
+            data = conn.recv(1024)
+            msg = json.loads(data.decode())
+            name = msg.get("name", "").strip().lower()
+            responses[name] = msg
+            print(f"[TCP] Received INFORM_Res from {name}")
+        except socket.timeout:
+            break
+        except Exception as e:
+            print(f"[TCP] Error while waiting for INFORM_Res: {e}")
+    tcp_receiver.close()
+
+    # Step 3: Check both responses exist
+    print("[DEBUG] Buyer expected:", buyer_name.lower())
+    print("[DEBUG] Seller expected:", seller_name.lower())
+    print("[DEBUG] Received responses from:", list(responses.keys()))
+
+    if buyer_name.lower() not in responses or seller_name.lower() not in responses:
+        reason = "Did not receive all required payment details"
+        cancel_msg = {
+            "type": "CANCEL",
+            "rq#": rq_number,
+            "reason": reason
+        }
+        for user in [buyer, seller]:
+            try:
+                with socket.create_connection((user["ip"], user["tcp_port"]), timeout=5) as sock:
+                    sock.sendall(json.dumps(cancel_msg).encode())
+            except:
+                pass
+        print("[TCP] Finalization cancelled: one party did not respond")
+        return
+
+    buyer_data = responses[buyer_name.lower()]
+    seller_data = responses[seller_name.lower()]
+
+    # Step 4: Validate buyer's credit card + address
+    if not re.match(r"^\d{16}$", buyer_data.get("cc#", "")):
+        reason = "Invalid credit card format"
+    elif not re.match(r"^(0[1-9]|1[0-2])/\d{2}$", buyer_data.get("cc_exp_date", "")):
+        reason = "Invalid expiration date format"
+    elif not buyer_data.get("address"):
+        reason = "Missing shipping address"
+    elif random.random() < 0.05:
+        reason = "Bank rejected the payment"
+    else:
+        reason = None
+
+    if reason:
+        cancel_msg = {
+            "type": "CANCEL",
+            "rq#": rq_number,
+            "reason": reason
+        }
+        for user in [buyer, seller]:
+            try:
+                with socket.create_connection((user["ip"], user["tcp_port"]), timeout=5) as sock:
+                    sock.sendall(json.dumps(cancel_msg).encode())
+            except:
+                pass
+        print(f"[TCP] Finalization failed: {reason}")
+        return
+
+    # Step 5: Success → send Shipping_Info to seller
+    shipping_info = {
+        "type": "Shipping_Info",
+        "rq#": rq_number,
+        "name": buyer_name,
+        "winner_address": buyer_data["address"]
+    }
+
+    try:
+        with socket.create_connection((seller["ip"], seller["tcp_port"]), timeout=5) as sock:
+            sock.sendall(json.dumps(shipping_info).encode())
+            print("[TCP] Shipping_Info sent to seller.")
+    except Exception as e:
+        print(f"[TCP] Could not send Shipping_Info: {e}")
 
 
 # Run server
