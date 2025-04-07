@@ -488,7 +488,7 @@ def finalize_purchase(item_name, rq_number, buyer_name, seller_name, final_price
     receiver_port = tcp_receiver.getsockname()[1]  # get assigned port
     tcp_receiver.listen(2)
     tcp_receiver.settimeout(120)
-    
+
     # Step 1: Send INFORM_Req to both
     inform_msg = {
         "type": "INFORM_Req",
@@ -585,8 +585,10 @@ def finalize_purchase(item_name, rq_number, buyer_name, seller_name, final_price
         "type": "Shipping_Info",
         "rq#": rq_number,
         "name": buyer_name,
-        "winner_address": buyer_data["address"]
-    }
+        "winner_address": buyer_data["address"],
+        "final_price": final_price  #  send final price so seller knows what they earned
+        }
+
 
     try:
         with socket.create_connection((seller["ip"], seller["tcp_port"]), timeout=5) as sock:

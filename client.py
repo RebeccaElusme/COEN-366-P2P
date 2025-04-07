@@ -354,6 +354,19 @@ class AuctionClient:
         elif msg_type == "CANCEL":
             print("\n[TCP] Transaction was CANCELLED.")
             print(f"Reason: {message.get('reason')}")
+        elif msg_type == "Shipping_Info":
+            buyer = message.get("name", "Unknown")
+            address = message.get("winner_address", "N/A")
+            price = float(message.get("final_price", 0))
+            seller_earning = round(price * 0.9, 2)
+
+            print("\n[TCP] Transaction completed successfully.")
+            print(f"Buyer: {buyer}")
+            print(f"Shipping Address: {address}")
+            print(f"Final Price: ${price}")
+            print(f"You will receive: ${seller_earning} after service fees.")
+            print("Please proceed to ship the item via surface mail.")
+
         else:
             print("[TCP] Unknown message received:")
             print(message)
