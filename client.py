@@ -32,9 +32,14 @@ class AuctionClient:
         self.server_address = ("127.0.0.1", 5000)  # Change to actual server IP if needed
 
         self.running = True  # To control thread shutdown
+
+        # Controls meny display fir negotation 
+        self.awaiting_negotiation_input = False  
+
         threading.Thread(target=self.listen_for_messages, daemon=True).start()
         threading.Thread(target=self.listen_for_tcp_connections, daemon=True).start()
 
+    
 
     def get_valid_role(self):
         ## Prompt the user for  (Buyer/Seller).
@@ -310,13 +315,17 @@ class AuctionClient:
         time_left = response_data.get("time_left")
         rq_number = response_data.get("rq#")
 
-        print("\n[NEGOTIATION REQUEST]")
+        self.awaiting_negotiation_input = True  # Block menu
+        # Show prompt clearly
+        print("\n NEGOTIATION REQUIRED")
         print(f"Item: {item_name}")
         print(f"Current Price: {current_price}")
         print(f"Time Left: {time_left}s")
         print(f"RQ#: {rq_number}")
+        print("You must respond to this negotiation request now.")
 
         if self.role == "Seller":
+
             decision = input("Do you want to lower the price? (yes/no): ").strip().lower()
             if decision == "yes":
                 try:
@@ -344,6 +353,7 @@ class AuctionClient:
                 }
 
             self.udp_socket.sendto(json.dumps(response).encode(), self.server_address)
+            self.awaiting_negotiation_input = False  # Unblock menu
 
 
 ##########################################################################
@@ -394,12 +404,15 @@ class AuctionClient:
                 elif msg_type == "BID_REJECTED":
                     print(f"BID REJECTED (RQ# {rqt}): {response_data.get('reason')}")
                 elif msg_type == "NEGOTIATE_REQ":
-                    print("\n[NEGOTIATION REQUEST]")
+                    self.handle_negotiate_request(response_data)
+                elif msg_type == "ACCEPT_CONFIRMED":
+                    print(f"Server confirmed price adjustment (RQ# {rqt})")
+                elif msg_type == "PRICE_ADJUSTMENT":
+                    print("\nPRICE ADJUSTMENT:")
                     print(f"Item: {response_data.get('item_name')}")
-                    print(f"Current Price: {response_data.get('current_price')}")
+                    print(f"New Price: {response_data.get('new_price')}")
                     print(f"Time Left: {response_data.get('time_left')}s")
                     print(f"RQ#: {rqt}")
-                    self.handle_negotiate_request(response_data)
                 else:
                     print("Unknown response:", response_data)
 
@@ -411,6 +424,9 @@ if __name__ == "__main__":
         
         while True:
             time.sleep(0.5)
+            if client.awaiting_negotiation_input:
+                continue  # Skip menu while waiting for negotiation response
+
             print("\nOptions:")
             print("1. Register")
             print("2. De-register")
