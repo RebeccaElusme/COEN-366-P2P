@@ -182,6 +182,31 @@ def start_tcp_server(stop_event):
     finally:
         server_socket.close()
 
+#Establish TCP connections to send messages
+def tcp_send_message(client_name, message):
+    """Establishes a TCP connection with a client and sends a message."""
+    if client_name not in registered_clients:
+        print(f"Client {client_name} not found.")
+        return False
+
+    client = registered_clients[client_name]
+    client_ip = client["ip"]
+    client_tcp_port = client["tcp_port"]
+
+    try:
+        # Create a TCP socket
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.connect((client_ip, client_tcp_port))
+        
+        # Send the message
+        client_socket.sendall(json.dumps(message).encode())
+        client_socket.close()
+        return True
+    except Exception as e:
+        print(f"Error sending TCP message to {client_name}: {e}")
+        return False
+    
+
 # List items for request from sellers
 def list_item(data, server_socket):
     rq_number = data.get("rq#")
@@ -269,6 +294,12 @@ def process_bid(data, client_address, server_socket):
                 "reason": f"Bid must be higher than current price ({matching_auction['current_price']})"
             }
 
+        # Track all bidders for later notifications
+        if "all_bidders" not in matching_auction:
+            matching_auction["all_bidders"] = []
+        if bidder_name not in matching_auction["all_bidders"]:
+            matching_auction["all_bidders"].append(bidder_name)
+
         # Accept bid
         matching_auction["current_price"] = bid_amount
         matching_auction["highest_bidder"] = bidder_name
@@ -301,10 +332,9 @@ def process_bid(data, client_address, server_socket):
             server_socket.sendto(msg_encoded, seller_addr)
 
         print(f"Accepted bid from {bidder_name} on '{item_name}' for {bid_amount}")
-        return None  # No need to send further response here
+        return None  # No need to send further response here    return None  # No need to send further response here
 
 
-################################################################
 def auction_timer(item_name, rq_number, duration, server_socket):
     import time
 
@@ -343,39 +373,58 @@ def auction_timer(item_name, rq_number, duration, server_socket):
 
         if time_left == 0:
             print(f"Auction for '{item_name}' (RQ# {rq_number}) ended.")
+            # Call auction_closure to notify winner and seller
+            auction_closure(item_name, rq_number, server_socket)
 
+######### AUNCTION CLOSURE: WINNER, LOSER, NO OFFER  #################################
 def auction_closure(item_name, rq_number, server_socket):
     """Handles the closure of an auction, notifying the winner and the seller."""
     # Get the auction details
-    auction_list = items_auctions.get(item_name, [])
-    if not auction_list:
-        print(f"No auction found for item {item_name}.")
-        return
-    
-    # Find the auction for the specific RQ#
-    winning_bid = None
-    seller_name = None
-    for auction in auction_list:
-        if auction["announcement_rq"] == rq_number:
-            seller_name = auction["seller"]
-            winning_bid = auction.get("current_price")
-            highest_bidder = auction.get("highest_bidder")
-            break
+    with lock:
+        auction_list = items_auctions.get(item_name, [])
+        if not auction_list:
+            print(f"No auction found for item {item_name}.")
+            return
+        
+        # Find the auction for the specific RQ#
+        auction_to_close = None
+        for auction in auction_list:
+            if auction["announcement_rq"] == rq_number:
+                auction_to_close = auction
+                break
+        
+        if not auction_to_close:
+            print(f"No auction found for item {item_name} with RQ# {rq_number}.")
+            return
+        
+        seller_name = auction_to_close.get("seller")
+        highest_bidder = auction_to_close.get("highest_bidder")
+        winning_bid = auction_to_close.get("current_price")
+        
+        # Track all bidders to notify losers
+        all_bidders = auction_to_close.get("all_bidders", [])
+        if highest_bidder and highest_bidder not in all_bidders:
+            all_bidders.append(highest_bidder)
+        
+        # Remove the auction from the active auctions list
+        items_auctions[item_name].remove(auction_to_close)
+        if not items_auctions[item_name]:
+            del items_auctions[item_name]
 
     # Case when no bids were placed
-    if not winning_bid:
-        # Send NON_OFFER message to seller
+    if not highest_bidder:
+        # Send NON_OFFER message to seller using TCP
         message = {
             "type": "NON_OFFER",
             "rq#": rq_number,
             "item_name": item_name
         }
-        server_socket.sendto(json.dumps(message).encode(), registered_clients[seller_name]["tcp_address"])
-        print(f"Sent NON_OFFER to seller {seller_name}.")
+        success = tcp_send_message(seller_name, message)
+        if success:
+            print(f"Sent NON_OFFER to seller {seller_name}.")
         return
 
-    # Send WINNER message to the highest bidder (buyer)
-    buyer_name = highest_bidder
+    # Send WINNER message to the highest bidder (buyer) using TCP
     winner_message = {
         "type": "WINNER",
         "rq#": rq_number,
@@ -383,21 +432,34 @@ def auction_closure(item_name, rq_number, server_socket):
         "final_price": winning_bid,
         "seller_name": seller_name
     }
-    buyer_address = (registered_clients[buyer_name]["ip"], registered_clients[buyer_name]["tcp_port"])
-    server_socket.sendto(json.dumps(winner_message).encode(), buyer_address)
-    print(f"Sent WINNER message to {buyer_name}.")
+    success = tcp_send_message(highest_bidder, winner_message)
+    if success:
+        print(f"Sent WINNER message to {highest_bidder}.")
 
-    # Send SOLD message to the seller
-    seller_address = (registered_clients[seller_name]["ip"], registered_clients[seller_name]["tcp_port"])
+    # Send SOLD message to the seller using TCP
     sold_message = {
         "type": "SOLD",
         "rq#": rq_number,
         "item_name": item_name,
         "final_price": winning_bid,
-        "buyer_name": buyer_name
+        "buyer_name": highest_bidder
     }
-    server_socket.sendto(json.dumps(sold_message).encode(), seller_address)
-    print(f"Sent SOLD message to seller {seller_name}.")
+    success = tcp_send_message(seller_name, sold_message)
+    if success:
+        print(f"Sent SOLD message to seller {seller_name}.")
+    
+    # Notify all losing bidders
+    for bidder in all_bidders:
+        if bidder != highest_bidder:
+            loser_message = {
+                "type": "LOSER",
+                "rq#": rq_number,
+                "item_name": item_name,
+                "winner_final_price": winning_bid,
+                "winner_name": highest_bidder
+            }
+            tcp_send_message(bidder, loser_message)
+            print(f"Sent LOSER notification to {bidder}.")
 
 # Run server
 if __name__ == "__main__":

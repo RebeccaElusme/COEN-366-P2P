@@ -15,7 +15,6 @@ class AuctionClient:
                 print("Invalid name. Try again.")
                 self.name = input("Enter name: ").strip()
 
-
         self.role = self.get_valid_role()
         self.rq_counter = 0
 
@@ -24,14 +23,17 @@ class AuctionClient:
         self.udp_socket.bind(("", 0))  # Bind to any available UDP port
         self.udp_port = self.udp_socket.getsockname()[1]  # Get the assigned UDP port
 
+        # TCP Socket setup
         self.tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.tcp_socket.bind(("", 0))  # Bind to any available TCP port
         self.tcp_port = self.tcp_socket.getsockname()[1]  # Get the assigned TCP port
+        self.tcp_socket.listen(5)  # Listen for incoming connections
 
         self.server_address = ("127.0.0.1", 5000)  # Change to actual server IP if needed
 
         self.running = True  # To control thread shutdown
         threading.Thread(target=self.listen_for_messages, daemon=True).start()
+        threading.Thread(target=self.listen_for_tcp_connections, daemon=True).start()
 
 
     def get_valid_role(self):
@@ -92,25 +94,73 @@ class AuctionClient:
             except (json.JSONDecodeError, ConnectionResetError):
                 print("Error receiving or decoding server message.")
                 
-    def listen_for_tcp_messages(self):
-        """Listen for TCP messages from the server after the auction ends."""
+    def listen_for_tcp_connections(self):
+        """Listen for TCP connections from the server."""
         while self.running:
             try:
                 self.tcp_socket.settimeout(1)  # Non-blocking wait
-                response = self.tcp_socket.recv(1024)
-                response_data = json.loads(response.decode())
-                self.handle_auction_closure_response(response_data)
+                client_socket, addr = self.tcp_socket.accept()
+                threading.Thread(target=self.handle_tcp_connection, args=(client_socket,), daemon=True).start()
             except socket.timeout:
                 continue
-            except (json.JSONDecodeError, ConnectionResetError):
-                 print("Error receiving or decoding server message.")
+            except Exception as e:
+                print(f"Error accepting TCP connection: {e}")
+                
+    def handle_tcp_connection(self, client_socket):
+        """Handle incoming TCP connection and messages."""
+        try:
+            data = client_socket.recv(1024)
+            if data:
+                response_data = json.loads(data.decode())
+                self.handle_auction_closure_message(response_data)
+        except Exception as e:
+            print(f"Error handling TCP connection: {e}")
+        finally:
+            client_socket.close()
+            
+    def handle_auction_closure_message(self, response_data):
+        """Handle auction closure messages from the server."""
+        msg_type = response_data.get("type", "UNKNOWN")
+        rqt = response_data.get("rq#", "Unknown")
+        item_name = response_data.get("item_name", "Unknown")
+        
+        if msg_type == "WINNER":
+            final_price = response_data.get('final_price', 0)
+            seller_name = response_data.get('seller_name', 'Unknown')
+            print(f"\nWINNER | {rqt} | {item_name} | {final_price} | {seller_name}")
+            print("You won the auction for this item.")
+            print("Please arrange payment and shipping with the seller.")
+        
+        elif msg_type == "SOLD":
+            final_price = response_data.get('final_price', 0)
+            buyer_name = response_data.get('buyer_name', 'Unknown')
+            print(f"\nSOLD | {rqt} | {item_name} | {final_price} | {buyer_name}")
+            print("Your item has been sold.")
+            print("Please arrange payment and shipping with the buyer.")
+        
+        elif msg_type == "NON_OFFER":
+            print(f"\nNON_OFFER | {rqt} | {item_name}")
+            print("Your auction has ended with no bids.")
+            print("You may want to list it again with a lower starting price.")
+        
+        elif msg_type == "LOSER":
+            winner_price = response_data.get('winner_final_price', 0)
+            winner_name = response_data.get('winner_name', 'Unknown')
+            print(f"\nLOSER | {rqt} | {item_name} | {winner_price} | {winner_name}")
+            print("You did not win this auction.")
+        
+        else:
+            print(f"Unknown auction closure message: {response_data}")
 
 
-## To close clinet socket
+## To close client socket
     def close_socket(self):
-            self.running = False
+        self.running = False
+        try:
             self.udp_socket.close()
             self.tcp_socket.close()
+        except:
+            pass  # Ignore errors during shutdown
 
 
     ############# THIS IS TO PUT A LISTING UP ######################
