@@ -483,6 +483,12 @@ def finalize_purchase(item_name, rq_number, buyer_name, seller_name, final_price
         print(f"[TCP] Missing buyer/seller info for finalization.")
         return
 
+    tcp_receiver = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    tcp_receiver.bind((SERVER_IP, 0))  # bind to any free port
+    receiver_port = tcp_receiver.getsockname()[1]  # get assigned port
+    tcp_receiver.listen(2)
+    tcp_receiver.settimeout(120)
+    
     # Step 1: Send INFORM_Req to both
     inform_msg = {
         "type": "INFORM_Req",
@@ -504,11 +510,6 @@ def finalize_purchase(item_name, rq_number, buyer_name, seller_name, final_price
     # Step 2: Listen for INFORM_Res responses
     responses = {}
 
-    tcp_receiver = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    tcp_receiver.bind((SERVER_IP, 0))  # bind to any free port
-    receiver_port = tcp_receiver.getsockname()[1]  # get assigned port
-    tcp_receiver.listen(2)
-    tcp_receiver.settimeout(120)
 
 
     print(f"[TCP] Waiting for INFORM_Res from buyer and seller...")
