@@ -9,6 +9,8 @@ import time
 class AuctionClient:
     #Class initialization
     def __init__(self):
+
+        self.is_registered = False
         
         self.name = input("Enter name: ").strip().lower()
         while not self.name.isalpha():
@@ -19,6 +21,7 @@ class AuctionClient:
         self.role = self.get_valid_role()
         self.rq_counter = 0
 
+
         # Dynamically assign UDP and TCP ports
         self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.udp_socket.bind(("", 0))  # Bind to any available UDP port
@@ -28,7 +31,11 @@ class AuctionClient:
         self.tcp_socket.bind(("", 0))  # Bind to any available TCP port
         self.tcp_port = self.tcp_socket.getsockname()[1]  # Get the assigned TCP port
 
+
         self.server_address = ("127.0.0.1", 5000)  # Change to actual server IP if needed
+
+        self.send_register_request()  # Auto-register after getting name and role
+        self.is_registered = True     # Track registration status
 
         self.running = True  # To control thread shutdown
 
@@ -498,6 +505,13 @@ if __name__ == "__main__":
 
             if choice == "1":
                 client.send_register_request()
+                client.is_registered = True
+            elif choice == "2":
+                client.send_deregister_request()
+                client.is_registered = False
+            elif not client.is_registered and choice != "1":
+                print("You must register first to use any other functionality.")
+                continue
             elif choice == "2":
                 client.send_deregister_request()
             elif choice == "3":
@@ -514,8 +528,6 @@ if __name__ == "__main__":
                 print("Exiting client...")
                 client.close_socket()
                 sys.exit(0)
-            elif choice == "9":
-                 client.send_tcp_test()
             else:
                 print("Invalid option, please try again.")
     except KeyboardInterrupt:
